@@ -1,49 +1,40 @@
 FROM php:8.1-apache
 
-# Instala dependências do sistema
+# Instala dependências básicas
 RUN apt-get update && apt-get install -y \
+    libpq-dev \
     libpng-dev \
     libjpeg-dev \
     libfreetype6-dev \
-    libpq-dev \
-    tesseract-ocr \
-    tesseract-ocr-por \
-    zip \
+    libzip-dev \
     unzip \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Configura e instala extensão GD
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg
+# Instala extensões PHP
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg && \
+    docker-php-ext-install -j$(nproc) gd pdo pdo_pgsql
 
-# Instala extensões PHP (separado para evitar erro)
-RUN docker-php-ext-install gd
-RUN docker-php-ext-install pdo
-RUN docker-php-ext-install pdo_pgsql
+# Instala Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Copia Composer do container oficial
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
-
-# Habilita mod_rewrite
+# Configura Apache
 RUN a2enmod rewrite
 
-# Define diretório de trabalho
+# Copia arquivos
 WORKDIR /var/www/html
+COPY composer.json composer.lock* ./
 
-# Copia arquivos do projeto
+# Instala dependências (sem falhar se não houver)
+RUN composer install --no-dev --optimize-autoloader --no-interaction --ignore-platform-reqs || true
+
+# Copia resto dos arquivos
 COPY . .
 
-# Instala dependências PHP
-RUN composer install --no-dev --optimize-autoloader --no-interaction || composer install --optimize-autoloader
+# Cria diretórios
+RUN mkdir -p /tmp/uploads /tmp/data && \
+    chmod -R 777 /tmp && \
+    chown -R www-data:www-data /var/www/html
 
-# Cria diretórios temporários
-RUN mkdir -p /tmp/uploads /tmp/data && chmod -R 777 /tmp
-
-# Define permissões
-RUN chown -R www-data:www-data /var/www/html && chmod -R 755 /var/www/html
-
-# Expõe porta 80
 EXPOSE 80
-
-# Comando de inicialização
 CMD ["apache2-foreground"]

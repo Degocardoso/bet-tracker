@@ -1,0 +1,23 @@
+{
+  "name": "Bet Tracker",
+  "description": "Sistema de rastreamento de apostas com OCR",
+  "repository": "https://github.com/yourusername/bet-tracker",
+  "keywords": ["php", "betting", "ocr", "postgresql"],
+  "buildpacks": [
+    {
+      "url": "heroku/php"
+    }
+  ],
+  "addons": [
+    {
+      "plan": "heroku-postgresql:mini",
+      "as": "DATABASE"
+    }
+  ],
+  "env": {
+    "APP_ENV": {
+      "description": "Application environment",
+      "value": "production"
+    }
+  }
+}

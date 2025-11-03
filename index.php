@@ -1,4 +1,12 @@
 <?php
+session_start();
+
+// Verifica se está logado
+if (!isset($_SESSION['user_id'])) {
+    header('Location: login.php');
+    exit;
+}
+
 require_once __DIR__ . '/vendor/autoload.php';
 
 use App\Database;
@@ -6,10 +14,11 @@ use App\BetManager;
 use App\OCRProcessor;
 use App\ExcelExporter;
 
-session_start();
-
 // Inicializa o gerenciador de apostas
 $betManager = new BetManager();
+
+// Nome do usuário logado
+$usuarioLogado = $_SESSION['nome_completo'];
 
 // Processa ações
 $message = '';
@@ -19,12 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // Upload de imagem
     if (isset($_POST['action']) && $_POST['action'] === 'upload') {
-        $usuario = trim($_POST['usuario'] ?? '');
-        
-        if (empty($usuario)) {
-            $message = 'Por favor, informe seu nome.';
-            $messageType = 'danger';
-        } elseif (isset($_FILES['imagem']) && $_FILES['imagem']['error'] === UPLOAD_ERR_OK) {
+        if (isset($_FILES['imagem']) && $_FILES['imagem']['error'] === UPLOAD_ERR_OK) {
             $uploadDir = __DIR__ . '/uploads/';
             if (!is_dir($uploadDir)) {
                 mkdir($uploadDir, 0777, true);
@@ -39,8 +43,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $extractedData = $ocrProcessor->processImage($filepath);
                 
                 if ($extractedData) {
-                    // Adiciona o usuário aos dados
-                    $extractedData['usuario'] = $usuario;
+                    // Adiciona o usuário logado aos dados
+                    $extractedData['usuario'] = $usuarioLogado;
                     $extractedData['imagem_nome'] = $filename;
                     
                     // Salva no banco
@@ -182,14 +186,29 @@ $stats = $betManager->getStatistics($usuario);
             background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
             color: white;
         }
+        
+        .user-info {
+            background: rgba(255,255,255,0.2);
+            padding: 10px 20px;
+            border-radius: 10px;
+            color: white;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- Header -->
-        <div class="text-center text-white mb-4">
-            <h1 class="display-4"><i class="bi bi-trophy"></i> Bet Tracker</h1>
-            <p class="lead">Sistema Inteligente de Rastreamento de Apostas com OCR</p>
+        <div class="d-flex justify-content-between align-items-center text-white mb-4">
+            <div>
+                <h1 class="display-4"><i class="bi bi-trophy"></i> Bet Tracker</h1>
+                <p class="lead">Sistema Inteligente de Rastreamento de Apostas com OCR</p>
+            </div>
+            <div class="user-info">
+                <i class="bi bi-person-circle"></i> <strong><?php echo htmlspecialchars($usuarioLogado); ?></strong>
+                <a href="logout.php" class="btn btn-sm btn-danger ms-3">
+                    <i class="bi bi-box-arrow-right"></i> Sair
+                </a>
+            </div>
         </div>
 
         <?php if ($message): ?>
@@ -203,25 +222,25 @@ $stats = $betManager->getStatistics($usuario);
         <div class="row mb-4">
             <div class="col-md-3 col-6 mb-3">
                 <div class="stats-card">
-                    <h4><?php echo $stats['total_apostas']; ?></h4>
+                    <h4><?php echo intval($stats['total_apostas'] ?? 0); ?></h4>
                     <p class="mb-0">Total de Apostas</p>
                 </div>
             </div>
             <div class="col-md-3 col-6 mb-3">
                 <div class="stats-card">
-                    <h4>R$ <?php echo number_format($stats['total_investido'], 2, ',', '.'); ?></h4>
+                    <h4>R$ <?php echo number_format(floatval($stats['total_investido'] ?? 0), 2, ',', '.'); ?></h4>
                     <p class="mb-0">Total Investido</p>
                 </div>
             </div>
             <div class="col-md-3 col-6 mb-3">
                 <div class="stats-card" style="background: var(--green-color);">
-                    <h4><?php echo $stats['total_greens']; ?></h4>
+                    <h4><?php echo intval($stats['total_greens'] ?? 0); ?></h4>
                     <p class="mb-0">Greens</p>
                 </div>
             </div>
             <div class="col-md-3 col-6 mb-3">
                 <div class="stats-card" style="background: var(--red-color);">
-                    <h4><?php echo $stats['total_reds']; ?></h4>
+                    <h4><?php echo intval($stats['total_reds'] ?? 0); ?></h4>
                     <p class="mb-0">Reds</p>
                 </div>
             </div>
@@ -233,9 +252,8 @@ $stats = $betManager->getStatistics($usuario);
             <form method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="action" value="upload">
                 
-                <div class="mb-3">
-                    <label class="form-label">Seu Nome *</label>
-                    <input type="text" name="usuario" class="form-control" required placeholder="Digite seu nome">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> Suas apostas serão automaticamente registradas como: <strong><?php echo htmlspecialchars($usuarioLogado); ?></strong>
                 </div>
                 
                 <div class="upload-area mb-3">
@@ -319,16 +337,16 @@ $stats = $betManager->getStatistics($usuario);
                         <tbody>
                             <?php foreach ($bets as $bet): ?>
                             <tr class="<?php echo $bet['green'] ? 'table-green' : ($bet['red'] !== null ? 'table-red' : ''); ?>">
-                                <td><?php echo htmlspecialchars($bet['data']); ?></td>
-                                <td>R$ <?php echo number_format($bet['valor_apostado'], 2, ',', '.'); ?></td>
-                                <td><?php echo number_format($bet['odd'], 2, ',', '.'); ?></td>
+                                <td><?php echo htmlspecialchars($bet['data'] ?? '-'); ?></td>
+                                <td>R$ <?php echo number_format(floatval($bet['valor_apostado'] ?? 0), 2, ',', '.'); ?></td>
+                                <td><?php echo number_format(floatval($bet['odd'] ?? 0), 2, ',', '.'); ?></td>
                                 <td>
-                                    <?php echo $bet['green'] ? 'R$ ' . number_format($bet['green'], 2, ',', '.') : '-'; ?>
+                                    <?php echo $bet['green'] ? 'R$ ' . number_format(floatval($bet['green']), 2, ',', '.') : '-'; ?>
                                 </td>
                                 <td>
-                                    <?php echo $bet['red'] !== null ? 'R$ ' . number_format($bet['red'], 2, ',', '.') : '-'; ?>
+                                    <?php echo $bet['red'] !== null ? 'R$ ' . number_format(floatval($bet['red']), 2, ',', '.') : '-'; ?>
                                 </td>
-                                <td><?php echo htmlspecialchars($bet['usuario']); ?></td>
+                                <td><?php echo htmlspecialchars($bet['usuario'] ?? '-'); ?></td>
                                 <td>
                                     <button class="btn btn-danger btn-sm" onclick="confirmarExclusao(<?php echo $bet['id']; ?>)">
                                         <i class="bi bi-trash"></i>

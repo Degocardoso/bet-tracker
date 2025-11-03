@@ -1,41 +1,42 @@
 <?php
 namespace App;
 
-use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-use PhpOffice\PhpSpreadsheet\Style\Fill;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
-
 class ExcelExporter {
     
     public function exportBets($bets) {
-        $spreadsheet = new Spreadsheet();
+        // Verifica se PhpSpreadsheet está disponível
+        if (class_exists('PhpOffice\PhpSpreadsheet\Spreadsheet')) {
+            return $this->exportWithSpreadsheet($bets);
+        } else {
+            // Fallback: exporta como CSV
+            return $this->exportCSV($bets);
+        }
+    }
+    
+    private function exportWithSpreadsheet($bets) {
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         
-        // Define o título
         $sheet->setTitle('Apostas');
         
-        // Cabeçalhos
         $headers = ['Data', 'Valor Apostado', 'ODD', 'Green', 'Red', 'Usuário'];
         $sheet->fromArray($headers, null, 'A1');
         
-        // Estilo do cabeçalho
         $headerStyle = [
             'font' => [
                 'bold' => true,
                 'color' => ['rgb' => 'FFFFFF']
             ],
             'fill' => [
-                'fillType' => Fill::FILL_SOLID,
+                'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
                 'startColor' => ['rgb' => '4472C4']
             ],
             'alignment' => [
-                'horizontal' => Alignment::HORIZONTAL_CENTER
+                'horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER
             ]
         ];
         $sheet->getStyle('A1:F1')->applyFromArray($headerStyle);
         
-        // Dados
         $row = 2;
         foreach ($bets as $bet) {
             $sheet->setCellValue('A' . $row, $bet['data']);
@@ -45,31 +46,28 @@ class ExcelExporter {
             $sheet->setCellValue('E' . $row, $bet['red'] !== null ? 'R$ ' . number_format($bet['red'], 2, ',', '.') : '');
             $sheet->setCellValue('F' . $row, $bet['usuario']);
             
-            // Destaca greens em verde e reds em vermelho
             if ($bet['green']) {
                 $sheet->getStyle('D' . $row)->getFill()
-                    ->setFillType(Fill::FILL_SOLID)
+                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
                     ->getStartColor()->setRGB('C6EFCE');
             }
             if ($bet['red'] !== null) {
                 $sheet->getStyle('E' . $row)->getFill()
-                    ->setFillType(Fill::FILL_SOLID)
+                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
                     ->getStartColor()->setRGB('FFC7CE');
             }
             
             $row++;
         }
         
-        // Ajusta largura das colunas
         foreach (range('A', 'F') as $col) {
             $sheet->getColumnDimension($col)->setAutoSize(true);
         }
         
-        // Gera o arquivo
         $filename = 'apostas_' . date('Y-m-d_H-i-s') . '.xlsx';
         $filepath = sys_get_temp_dir() . '/' . $filename;
         
-        $writer = new Xlsx($spreadsheet);
+        $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
         $writer->save($filepath);
         
         return [
@@ -83,6 +81,9 @@ class ExcelExporter {
         $filepath = sys_get_temp_dir() . '/' . $filename;
         
         $fp = fopen($filepath, 'w');
+        
+        // BOM para Excel reconhecer UTF-8
+        fprintf($fp, chr(0xEF).chr(0xBB).chr(0xBF));
         
         // Cabeçalhos
         fputcsv($fp, ['Data', 'Valor Apostado', 'ODD', 'Green', 'Red', 'Usuario'], ';');

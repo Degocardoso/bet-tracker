@@ -1,7 +1,6 @@
 <?php
 session_start();
 
-// Verifica se está logado
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
@@ -14,19 +13,15 @@ use App\BetManager;
 use App\OCRProcessor;
 use App\ExcelExporter;
 
-// Inicializa o gerenciador de apostas
 $betManager = new BetManager();
-
-// Nome do usuário logado
 $usuarioLogado = $_SESSION['nome_completo'];
+$isAdmin = $_SESSION['username'] === 'admin';
 
-// Processa ações
 $message = '';
 $messageType = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
-    // Upload de imagem
     if (isset($_POST['action']) && $_POST['action'] === 'upload') {
         if (isset($_FILES['imagem']) && $_FILES['imagem']['error'] === UPLOAD_ERR_OK) {
             $uploadDir = __DIR__ . '/uploads/';
@@ -38,16 +33,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $filepath = $uploadDir . $filename;
             
             if (move_uploaded_file($_FILES['imagem']['tmp_name'], $filepath)) {
-                // Processa OCR
                 $ocrProcessor = new OCRProcessor();
                 $extractedData = $ocrProcessor->processImage($filepath);
                 
                 if ($extractedData) {
-                    // Adiciona o usuário logado aos dados
                     $extractedData['usuario'] = $usuarioLogado;
                     $extractedData['imagem_nome'] = $filename;
                     
-                    // Salva no banco
                     if ($betManager->saveBet($extractedData)) {
                         $message = 'Aposta cadastrada com sucesso!';
                         $messageType = 'success';
@@ -69,7 +61,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     
-    // Exclusão de aposta
     if (isset($_POST['action']) && $_POST['action'] === 'delete') {
         $id = intval($_POST['id']);
         if ($betManager->deleteBet($id)) {
@@ -82,7 +73,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Exportação
 if (isset($_GET['export'])) {
     $usuario = $_GET['usuario'] ?? null;
     $dataInicio = $_GET['data_inicio'] ?? null;
@@ -105,7 +95,6 @@ if (isset($_GET['export'])) {
     exit;
 }
 
-// Busca apostas com filtros
 $usuario = $_GET['usuario'] ?? null;
 $dataInicio = $_GET['data_inicio'] ?? null;
 $dataFim = $_GET['data_fim'] ?? null;
@@ -113,6 +102,7 @@ $dataFim = $_GET['data_fim'] ?? null;
 $bets = $betManager->getAllBets($usuario, $dataInicio, $dataFim);
 $usuarios = $betManager->getUsuarios();
 $stats = $betManager->getStatistics($usuario);
+$statsByUser = $betManager->getStatisticsByUser();
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -168,6 +158,14 @@ $stats = $betManager->getStatistics($usuario);
             margin-bottom: 5px;
         }
         
+        .stats-card.lucro {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        }
+        
+        .stats-card.prejuizo {
+            background: linear-gradient(135deg, #dc3545 0%, #e85d75 100%);
+        }
+        
         .table-green {
             background-color: #d4edda !important;
         }
@@ -201,11 +199,16 @@ $stats = $betManager->getStatistics($usuario);
         <div class="d-flex justify-content-between align-items-center text-white mb-4">
             <div>
                 <h1 class="display-4"><i class="bi bi-trophy"></i> Bet Tracker</h1>
-                <p class="lead">Sistema Inteligente de Rastreamento de Apostas com OCR</p>
+                <p class="lead">Sistema Inteligente de Rastreamento de Apostas</p>
             </div>
             <div class="user-info">
                 <i class="bi bi-person-circle"></i> <strong><?php echo htmlspecialchars($usuarioLogado); ?></strong>
-                <a href="logout.php" class="btn btn-sm btn-danger ms-3">
+                <?php if ($isAdmin): ?>
+                <a href="admin.php" class="btn btn-sm btn-warning ms-2">
+                    <i class="bi bi-gear"></i> Admin
+                </a>
+                <?php endif; ?>
+                <a href="logout.php" class="btn btn-sm btn-danger ms-2">
                     <i class="bi bi-box-arrow-right"></i> Sair
                 </a>
             </div>
@@ -218,7 +221,7 @@ $stats = $betManager->getStatistics($usuario);
         </div>
         <?php endif; ?>
 
-        <!-- Estatísticas -->
+        <!-- Estatísticas Gerais -->
         <div class="row mb-4">
             <div class="col-md-3 col-6 mb-3">
                 <div class="stats-card">
@@ -246,6 +249,77 @@ $stats = $betManager->getStatistics($usuario);
             </div>
         </div>
 
+        <!-- NOVO: Card de Lucro/Prejuízo Total -->
+        <div class="row mb-4">
+            <div class="col-md-6 mb-3">
+                <div class="stats-card <?php echo $stats['saldo'] >= 0 ? 'lucro' : 'prejuizo'; ?>">
+                    <h5><i class="bi bi-wallet2"></i> SALDO TOTAL</h5>
+                    <h3>R$ <?php echo number_format(abs($stats['saldo']), 2, ',', '.'); ?></h3>
+                    <p class="mb-0">
+                        <?php if ($stats['saldo'] >= 0): ?>
+                            <i class="bi bi-arrow-up-circle"></i> LUCRO
+                        <?php else: ?>
+                            <i class="bi bi-arrow-down-circle"></i> PREJUÍZO
+                        <?php endif; ?>
+                        (ROI: <?php echo number_format($stats['roi'], 2, ',', '.'); ?>%)
+                    </p>
+                </div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <div class="stats-card">
+                    <h5><i class="bi bi-graph-up"></i> RETORNO TOTAL</h5>
+                    <h3>R$ <?php echo number_format($stats['total_ganho'], 2, ',', '.'); ?></h3>
+                    <p class="mb-0">Total ganho em apostas vencedoras</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- NOVO: Estatísticas por Usuário -->
+        <?php if (count($statsByUser) > 1): ?>
+        <div class="main-card p-4 mb-4">
+            <h3 class="mb-4"><i class="bi bi-people"></i> Desempenho por Usuário</h3>
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Usuário</th>
+                            <th>Apostas</th>
+                            <th>Investido</th>
+                            <th>Retorno</th>
+                            <th>Saldo</th>
+                            <th>ROI %</th>
+                            <th>Greens</th>
+                            <th>Reds</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($statsByUser as $userStat): ?>
+                        <tr>
+                            <td><strong><?php echo htmlspecialchars($userStat['usuario']); ?></strong></td>
+                            <td><?php echo intval($userStat['total_apostas']); ?></td>
+                            <td>R$ <?php echo number_format($userStat['total_investido'], 2, ',', '.'); ?></td>
+                            <td>R$ <?php echo number_format($userStat['total_ganho'], 2, ',', '.'); ?></td>
+                            <td class="<?php echo $userStat['saldo'] >= 0 ? 'text-success' : 'text-danger'; ?>">
+                                <strong>R$ <?php echo number_format(abs($userStat['saldo']), 2, ',', '.'); ?></strong>
+                                <?php if ($userStat['saldo'] >= 0): ?>
+                                    <i class="bi bi-arrow-up-circle text-success"></i>
+                                <?php else: ?>
+                                    <i class="bi bi-arrow-down-circle text-danger"></i>
+                                <?php endif; ?>
+                            </td>
+                            <td class="<?php echo $userStat['roi'] >= 0 ? 'text-success' : 'text-danger'; ?>">
+                                <strong><?php echo number_format($userStat['roi'], 2, ',', '.'); ?>%</strong>
+                            </td>
+                            <td><span class="badge bg-success"><?php echo intval($userStat['total_greens']); ?></span></td>
+                            <td><span class="badge bg-danger"><?php echo intval($userStat['total_reds']); ?></span></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <!-- Upload -->
         <div class="main-card p-4 mb-4">
             <h3 class="mb-4"><i class="bi bi-cloud-upload"></i> Cadastrar Nova Aposta</h3>
@@ -264,7 +338,7 @@ $stats = $betManager->getStatistics($usuario);
                 </div>
                 
                 <button type="submit" class="btn btn-custom btn-lg w-100">
-                    <i class="bi bi-magic"></i> Processar com OCR
+                    <i class="bi bi-magic"></i> Processar e Cadastrar
                 </button>
             </form>
         </div>

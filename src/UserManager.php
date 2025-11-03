@@ -10,11 +10,9 @@ class UserManager {
     }
     
     private function initDatabase() {
-        // Detecta se é PostgreSQL ou SQLite
         $isPostgres = getenv('DATABASE_URL') !== false;
         
         if ($isPostgres) {
-            // PostgreSQL
             $sql = "CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(50) UNIQUE NOT NULL,
@@ -25,7 +23,6 @@ class UserManager {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )";
         } else {
-            // SQLite
             $sql = "CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username VARCHAR(50) UNIQUE NOT NULL,
@@ -38,8 +35,6 @@ class UserManager {
         }
         
         $this->db->exec($sql);
-        
-        // Cria usuário admin padrão se não existir
         $this->createDefaultAdmin();
     }
     
@@ -51,10 +46,11 @@ class UserManager {
             $result = $stmt->fetch();
             
             if ($result['total'] == 0) {
-                $this->createUser('admin', 'admin123', 'Administrador', 'admin@bettracker.com');
+                // Nova senha: sHMRe?!<<_886wj$R4ag
+                $this->createUser('admin', 'sHMRe?!<<_886wj$R4ag', 'Administrador', 'admin@bettracker.com');
             }
         } catch (\Exception $e) {
-            // Tabela pode não existir ainda, ignora
+            // Ignora se tabela não existe
         }
     }
     
@@ -63,8 +59,6 @@ class UserManager {
                 VALUES (:username, :password, :nome_completo, :email, :ativo)";
         
         $stmt = $this->db->prepare($sql);
-        
-        // PostgreSQL usa TRUE/FALSE, SQLite usa 1/0
         $isPostgres = getenv('DATABASE_URL') !== false;
         $ativo = $isPostgres ? true : 1;
         
@@ -78,7 +72,6 @@ class UserManager {
     }
     
     public function login($username, $password) {
-        // PostgreSQL usa TRUE, SQLite usa 1
         $isPostgres = getenv('DATABASE_URL') !== false;
         $ativoValue = $isPostgres ? 'TRUE' : '1';
         
@@ -134,7 +127,6 @@ class UserManager {
     }
     
     public function deleteUser($id) {
-        // Não permite deletar o admin
         if ($id == 1) {
             return false;
         }

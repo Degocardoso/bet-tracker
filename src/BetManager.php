@@ -91,12 +91,44 @@ class BetManager {
         $stmt->execute($params);
         $stats = $stmt->fetch();
         
-        // Calcula lucro/prejuízo
-        $stats['saldo'] = ($stats['total_ganho'] ?? 0) - ($stats['total_investido'] ?? 0);
+        // Calcula saldo (lucro/prejuízo)
+        $stats['total_investido'] = floatval($stats['total_investido'] ?? 0);
+        $stats['total_ganho'] = floatval($stats['total_ganho'] ?? 0);
+        $stats['total_perdido'] = floatval($stats['total_perdido'] ?? 0);
+        $stats['saldo'] = $stats['total_ganho'] - $stats['total_investido'];
         $stats['roi'] = $stats['total_investido'] > 0 
             ? (($stats['saldo'] / $stats['total_investido']) * 100) 
             : 0;
         
         return $stats;
+    }
+    
+    // NOVO: Estatísticas por usuário
+    public function getStatisticsByUser() {
+        $sql = "SELECT 
+                    usuario,
+                    COUNT(*) as total_apostas,
+                    SUM(valor_apostado) as total_investido,
+                    SUM(CASE WHEN green IS NOT NULL THEN green ELSE 0 END) as total_ganho,
+                    COUNT(CASE WHEN green IS NOT NULL THEN 1 END) as total_greens,
+                    COUNT(CASE WHEN red IS NOT NULL THEN 1 END) as total_reds
+                FROM bets
+                GROUP BY usuario
+                ORDER BY usuario";
+        
+        $stmt = $this->db->query($sql);
+        $results = $stmt->fetchAll();
+        
+        // Calcula saldo para cada usuário
+        foreach ($results as &$user) {
+            $user['total_investido'] = floatval($user['total_investido'] ?? 0);
+            $user['total_ganho'] = floatval($user['total_ganho'] ?? 0);
+            $user['saldo'] = $user['total_ganho'] - $user['total_investido'];
+            $user['roi'] = $user['total_investido'] > 0 
+                ? (($user['saldo'] / $user['total_investido']) * 100) 
+                : 0;
+        }
+        
+        return $results;
     }
 }

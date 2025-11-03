@@ -5,7 +5,9 @@
     "require": {
         "php": "^8.0",
         "ext-pdo": "*",
-        "ext-gd": "*"
+        "ext-gd": "*",
+        "thiagoalessio/tesseract_ocr": "^2.13",
+        "phpoffice/phpspreadsheet": "^1.29"
     },
     "config": {
         "optimize-autoloader": true,

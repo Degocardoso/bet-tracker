@@ -24,6 +24,27 @@ $uploadedImage = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
+    // Cadastro manual - vai direto para modal de confirmação
+    if (isset($_POST['action']) && $_POST['action'] === 'manual_preview') {
+        $ocrData = [
+            'data' => $_POST['data'] ?? date('Y-m-d'),
+            'valor_apostado' => floatval($_POST['valor_apostado'] ?? 0),
+            'odd' => floatval($_POST['odd'] ?? 0),
+            'retorno' => floatval($_POST['retorno'] ?? 0),
+            'green' => null,
+            'red' => null
+        ];
+        
+        // Calcula Green ou Red
+        if ($ocrData['retorno'] > $ocrData['valor_apostado']) {
+            $ocrData['green'] = $ocrData['retorno'];
+        } else {
+            $ocrData['red'] = 0;
+        }
+        
+        $uploadedImage = null; // Sem imagem no modo manual
+    }
+    
     // Upload inicial - só processa OCR
     if (isset($_POST['action']) && $_POST['action'] === 'upload_preview') {
         if (isset($_FILES['imagem']) && $_FILES['imagem']['error'] === UPLOAD_ERR_OK) {
@@ -43,7 +64,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     
-    // Salvar após confirmação
     // Salvar após confirmação
     if (isset($_POST['action']) && $_POST['action'] === 'save_bet') {
         $valorApostado = floatval($_POST['valor_apostado'] ?? 0);
@@ -354,24 +374,89 @@ $statsByUser = $betManager->getStatisticsByUser();
         <!-- Upload -->
         <div class="main-card p-4 mb-4">
             <h3 class="mb-4"><i class="bi bi-cloud-upload"></i> Cadastrar Nova Aposta</h3>
-            <form method="POST" enctype="multipart/form-data" id="uploadForm">
-                <input type="hidden" name="action" value="upload_preview">
-                
-                <div class="alert alert-info">
-                    <i class="bi bi-info-circle"></i> Suas apostas serão automaticamente registradas como: <strong><?php echo htmlspecialchars($usuarioLogado); ?></strong>
+            
+            <div class="alert alert-info mb-4">
+                <i class="bi bi-info-circle"></i> Suas apostas serão automaticamente registradas como: <strong><?php echo htmlspecialchars($usuarioLogado); ?></strong>
+            </div>
+
+            <!-- Seletor de Método -->
+            <div class="mb-4">
+                <label class="form-label fw-bold">Como deseja cadastrar a aposta?</label>
+                <div class="btn-group w-100" role="group">
+                    <input type="radio" class="btn-check" name="metodo_cadastro" id="metodo_manual" value="manual" checked autocomplete="off">
+                    <label class="btn btn-outline-primary" for="metodo_manual" onclick="mostrarFormulario('manual')">
+                        <i class="bi bi-pencil-square"></i> Cadastro Manual
+                    </label>
+
+                    <input type="radio" class="btn-check" name="metodo_cadastro" id="metodo_imagem" value="imagem" autocomplete="off">
+                    <label class="btn btn-outline-primary" for="metodo_imagem" onclick="mostrarFormulario('imagem')">
+                        <i class="bi bi-image"></i> Upload de Imagem (OCR)
+                    </label>
                 </div>
-                
-                <div class="upload-area mb-3">
-                    <i class="bi bi-image" style="font-size: 3rem; color: #667eea;"></i>
-                    <h5 class="mt-3">Envie o print da sua aposta</h5>
-                    <p class="text-muted">Arraste e solte ou clique para selecionar</p>
-                    <input type="file" name="imagem" class="form-control mt-3" accept="image/*" required>
-                </div>
-                
-                <button type="submit" class="btn btn-custom btn-lg w-100">
-                    <i class="bi bi-search"></i> Processar Imagem
-                </button>
-            </form>
+            </div>
+
+            <!-- Formulário Manual -->
+            <div id="form_manual" style="display: block;">
+                <form method="POST" id="manualForm">
+                    <input type="hidden" name="action" value="manual_preview">
+                    
+                    <div class="row">
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">Data da Aposta *</label>
+                            <input type="date" name="data" class="form-control" value="<?php echo date('Y-m-d'); ?>" required>
+                        </div>
+                        
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">Valor Apostado (R$) *</label>
+                            <input type="number" name="valor_apostado" id="manual_valor" class="form-control" step="0.01" required placeholder="130.00">
+                        </div>
+                        
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">ODD *</label>
+                            <input type="number" name="odd" class="form-control" step="0.01" required placeholder="1.68">
+                        </div>
+                        
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">Retorno (R$) *</label>
+                            <input type="number" name="retorno" id="manual_retorno" class="form-control" step="0.01" required placeholder="219.66">
+                        </div>
+                    </div>
+
+                    <!-- Preview do resultado em tempo real -->
+                    <div class="alert alert-info" id="manual-resultado-preview">
+                        <div id="manual-resultado-texto">
+                            <i class="bi bi-calculator"></i> Preencha os valores para ver o resultado
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-custom btn-lg w-100">
+                        <i class="bi bi-check-circle"></i> Revisar e Confirmar Dados
+                    </button>
+                </form>
+            </div>
+
+            <!-- Formulário Upload de Imagem -->
+            <div id="form_imagem" style="display: none;">
+                <form method="POST" enctype="multipart/form-data" id="uploadForm">
+                    <input type="hidden" name="action" value="upload_preview">
+                    
+                    <div class="upload-area mb-3">
+                        <i class="bi bi-image" style="font-size: 3rem; color: #667eea;"></i>
+                        <h5 class="mt-3">Envie o print da sua aposta</h5>
+                        <p class="text-muted">Arraste e solte ou clique para selecionar</p>
+                        <input type="file" name="imagem" class="form-control mt-3" accept="image/*">
+                    </div>
+                    
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i> 
+                        <strong>Atenção:</strong> O OCR pode não extrair os dados perfeitamente. Você poderá revisar e corrigir antes de salvar.
+                    </div>
+                    
+                    <button type="submit" class="btn btn-custom btn-lg w-100">
+                        <i class="bi bi-search"></i> Processar Imagem com OCR
+                    </button>
+                </form>
+            </div>
         </div>
 
         <!-- Filtros -->
@@ -476,24 +561,37 @@ $statsByUser = $betManager->getStatisticsByUser();
     </div>
 
     <!-- Modal de Confirmação dos Dados -->
-    <?php if ($ocrData && $uploadedImage): ?>
+    <?php if ($ocrData): ?>
     <div class="modal fade show" id="confirmModal" tabindex="-1" style="display: block; background: rgba(0,0,0,0.5);">
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-check-circle"></i> Confirmar Dados da Aposta</h5>
+                    <h5 class="modal-title">
+                        <i class="bi bi-check-circle"></i> Confirmar Dados da Aposta
+                        <?php if ($uploadedImage): ?>
+                            <span class="badge bg-info">Via OCR</span>
+                        <?php else: ?>
+                            <span class="badge bg-success">Cadastro Manual</span>
+                        <?php endif; ?>
+                    </h5>
                 </div>
                 <div class="modal-body">
                     <div class="row">
+                        <?php if ($uploadedImage): ?>
+                        <!-- Mostra imagem SE foi upload -->
                         <div class="col-md-5">
                             <h6 class="mb-3">Preview da Imagem:</h6>
                             <img src="uploads/<?php echo htmlspecialchars($uploadedImage); ?>" class="preview-image" alt="Preview">
                         </div>
                         <div class="col-md-7">
-                            <h6 class="mb-3">Dados Extraídos:</h6>
+                        <?php else: ?>
+                        <!-- Sem imagem no modo manual -->
+                        <div class="col-md-12">
+                        <?php endif; ?>
+                            <h6 class="mb-3">Dados da Aposta:</h6>
                             <form method="POST" id="confirmForm">
                                 <input type="hidden" name="action" value="save_bet">
-                                <input type="hidden" name="imagem_nome" value="<?php echo htmlspecialchars($uploadedImage); ?>">
+                                <input type="hidden" name="imagem_nome" value="<?php echo htmlspecialchars($uploadedImage ?? ''); ?>">
                                 
                                 <div class="mb-3">
                                     <label class="form-label">Usuário (não editável)</label>
@@ -523,7 +621,7 @@ $statsByUser = $betManager->getStatisticsByUser();
                                     </div>
                                 </div>
                                 
-                                <!-- Campo hidden para Green e Red (calculado automaticamente) -->
+                                <!-- Campos hidden para Green e Red -->
                                 <input type="hidden" name="green" id="green" value="<?php echo $ocrData['green'] ?? ''; ?>">
                                 <input type="hidden" name="red" id="red" value="<?php echo $ocrData['red'] ?? ''; ?>">
                                 
@@ -539,59 +637,6 @@ $statsByUser = $betManager->getStatisticsByUser();
                                     <strong>Atenção:</strong> Verifique se os dados estão corretos antes de salvar!
                                 </div>
                             </form>
-
-                            <script>
-                            // Calcula automaticamente Green/Red quando os campos mudarem
-                            document.addEventListener('DOMContentLoaded', function() {
-                                const valorApostado = document.getElementById('valor_apostado');
-                                const retorno = document.getElementById('retorno');
-                                const greenField = document.getElementById('green');
-                                const redField = document.getElementById('red');
-                                const resultadoPreview = document.getElementById('resultado-preview');
-                                const resultadoTexto = document.getElementById('resultado-texto');
-                                
-                                function calcularResultado() {
-                                    const apostado = parseFloat(valorApostado.value) || 0;
-                                    const retornoVal = parseFloat(retorno.value) || 0;
-                                    
-                                    if (apostado > 0 && retornoVal > 0) {
-                                        if (retornoVal > apostado) {
-                                            // GREEN
-                                            greenField.value = retornoVal;
-                                            redField.value = '';
-                                            resultadoPreview.className = 'alert alert-success';
-                                            const lucro = retornoVal - apostado;
-                                            resultadoTexto.innerHTML = `
-                                                <i class="bi bi-check-circle"></i> 
-                                                <strong>GREEN!</strong> Você ganhou R$ ${lucro.toFixed(2)} 
-                                                (Retorno: R$ ${retornoVal.toFixed(2)} > Apostado: R$ ${apostado.toFixed(2)})
-                                            `;
-                                        } else {
-                                            // RED
-                                            greenField.value = '';
-                                            redField.value = '0';
-                                            resultadoPreview.className = 'alert alert-danger';
-                                            const prejuizo = apostado - retornoVal;
-                                            resultadoTexto.innerHTML = `
-                                                <i class="bi bi-x-circle"></i> 
-                                                <strong>RED!</strong> Você perdeu R$ ${prejuizo.toFixed(2)} 
-                                                (Retorno: R$ ${retornoVal.toFixed(2)} <= Apostado: R$ ${apostado.toFixed(2)})
-                                            `;
-                                        }
-                                    } else {
-                                        resultadoPreview.className = 'alert alert-info';
-                                        resultadoTexto.innerHTML = '<i class="bi bi-calculator"></i> Preencha os valores para ver o resultado';
-                                    }
-                                }
-                                
-                                // Calcula quando os valores mudarem
-                                valorApostado.addEventListener('input', calcularResultado);
-                                retorno.addEventListener('input', calcularResultado);
-                                
-                                // Calcula imediatamente se já tiver valores
-                                calcularResultado();
-                            });
-                            </script>
                         </div>
                     </div>
                 </div>
@@ -599,8 +644,8 @@ $statsByUser = $betManager->getStatisticsByUser();
                     <a href="index.php" class="btn btn-secondary">
                         <i class="bi bi-x-circle"></i> Cancelar
                     </a>
-                    <button type="submit" form="confirmForm" class="btn btn-success">
-                        <i class="bi bi-check-circle"></i> Confirmar e Salvar
+                    <button type="submit" form="confirmForm" class="btn btn-success btn-lg">
+                        <i class="bi bi-check-circle"></i> Confirmar e Salvar Aposta
                     </button>
                 </div>
             </div>
@@ -635,6 +680,113 @@ $statsByUser = $betManager->getStatisticsByUser();
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // Função para alternar entre formulários
+        function mostrarFormulario(tipo) {
+            const formManual = document.getElementById('form_manual');
+            const formImagem = document.getElementById('form_imagem');
+            
+            if (tipo === 'manual') {
+                formManual.style.display = 'block';
+                formImagem.style.display = 'none';
+            } else {
+                formManual.style.display = 'none';
+                formImagem.style.display = 'block';
+            }
+        }
+
+        // Cálculo em tempo real no formulário manual
+        document.addEventListener('DOMContentLoaded', function() {
+            const manualValor = document.getElementById('manual_valor');
+            const manualRetorno = document.getElementById('manual_retorno');
+            const manualResultadoPreview = document.getElementById('manual-resultado-preview');
+            const manualResultadoTexto = document.getElementById('manual-resultado-texto');
+            
+            function calcularResultadoManual() {
+                const apostado = parseFloat(manualValor?.value) || 0;
+                const retornoVal = parseFloat(manualRetorno?.value) || 0;
+                
+                if (apostado > 0 && retornoVal > 0) {
+                    if (retornoVal > apostado) {
+                        // GREEN
+                        manualResultadoPreview.className = 'alert alert-success';
+                        const lucro = retornoVal - apostado;
+                        manualResultadoTexto.innerHTML = `
+                            <i class="bi bi-check-circle-fill"></i> 
+                            <strong>GREEN!</strong> Você ganhou R$ ${lucro.toFixed(2)} 
+                            (Retorno: R$ ${retornoVal.toFixed(2)} > Apostado: R$ ${apostado.toFixed(2)})
+                        `;
+                    } else {
+                        // RED
+                        manualResultadoPreview.className = 'alert alert-danger';
+                        const prejuizo = apostado - retornoVal;
+                        manualResultadoTexto.innerHTML = `
+                            <i class="bi bi-x-circle-fill"></i> 
+                            <strong>RED!</strong> Você perdeu R$ ${prejuizo.toFixed(2)} 
+                            (Retorno: R$ ${retornoVal.toFixed(2)} <= Apostado: R$ ${apostado.toFixed(2)})
+                        `;
+                    }
+                } else {
+                    manualResultadoPreview.className = 'alert alert-info';
+                    manualResultadoTexto.innerHTML = '<i class="bi bi-calculator"></i> Preencha os valores para ver o resultado';
+                }
+            }
+            
+            if (manualValor && manualRetorno) {
+                manualValor.addEventListener('input', calcularResultadoManual);
+                manualRetorno.addEventListener('input', calcularResultadoManual);
+            }
+            
+            // Calcula automaticamente Green/Red no modal de confirmação
+            const valorApostado = document.getElementById('valor_apostado');
+            const retorno = document.getElementById('retorno');
+            const greenField = document.getElementById('green');
+            const redField = document.getElementById('red');
+            const resultadoPreview = document.getElementById('resultado-preview');
+            const resultadoTexto = document.getElementById('resultado-texto');
+            
+            function calcularResultado() {
+                if (!valorApostado || !retorno) return;
+                
+                const apostado = parseFloat(valorApostado.value) || 0;
+                const retornoVal = parseFloat(retorno.value) || 0;
+                
+                if (apostado > 0 && retornoVal > 0) {
+                    if (retornoVal > apostado) {
+                        // GREEN
+                        greenField.value = retornoVal;
+                        redField.value = '';
+                        resultadoPreview.className = 'alert alert-success';
+                        const lucro = retornoVal - apostado;
+                        resultadoTexto.innerHTML = `
+                            <i class="bi bi-check-circle-fill"></i> 
+                            <strong>GREEN!</strong> Você ganhou R$ ${lucro.toFixed(2)} 
+                            (Retorno: R$ ${retornoVal.toFixed(2)} > Apostado: R$ ${apostado.toFixed(2)})
+                        `;
+                    } else {
+                        // RED
+                        greenField.value = '';
+                        redField.value = '0';
+                        resultadoPreview.className = 'alert alert-danger';
+                        const prejuizo = apostado - retornoVal;
+                        resultadoTexto.innerHTML = `
+                            <i class="bi bi-x-circle-fill"></i> 
+                            <strong>RED!</strong> Você perdeu R$ ${prejuizo.toFixed(2)} 
+                            (Retorno: R$ ${retornoVal.toFixed(2)} <= Apostado: R$ ${apostado.toFixed(2)})
+                        `;
+                    }
+                } else {
+                    resultadoPreview.className = 'alert alert-info';
+                    resultadoTexto.innerHTML = '<i class="bi bi-calculator"></i> Preencha os valores para ver o resultado';
+                }
+            }
+            
+            if (valorApostado && retorno) {
+                valorApostado.addEventListener('input', calcularResultado);
+                retorno.addEventListener('input', calcularResultado);
+                calcularResultado(); // Calcula imediatamente se já tiver valores
+            }
+        });
+        
         function confirmarExclusao(id) {
             document.getElementById('deleteId').value = id;
             new bootstrap.Modal(document.getElementById('deleteModal')).show();

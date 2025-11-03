@@ -10,20 +10,31 @@ class UserManager {
     }
     
     private function initDatabase() {
-        $sql = "CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY " . (getenv('DATABASE_URL') ? "" : "AUTOINCREMENT") . ",
-            username VARCHAR(50) UNIQUE NOT NULL,
-            password VARCHAR(255) NOT NULL,
-            nome_completo VARCHAR(100) NOT NULL,
-            email VARCHAR(100),
-            ativo BOOLEAN DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )";
+        // Detecta se é PostgreSQL ou SQLite
+        $isPostgres = getenv('DATABASE_URL') !== false;
         
-        if (getenv('DATABASE_URL')) {
-            $sql = str_replace('INTEGER PRIMARY KEY', 'SERIAL PRIMARY KEY', $sql);
-            $sql = str_replace('AUTOINCREMENT', '', $sql);
-            $sql = str_replace('BOOLEAN', 'BOOLEAN', $sql);
+        if ($isPostgres) {
+            // PostgreSQL
+            $sql = "CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                nome_completo VARCHAR(100) NOT NULL,
+                email VARCHAR(100),
+                ativo BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )";
+        } else {
+            // SQLite
+            $sql = "CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                nome_completo VARCHAR(100) NOT NULL,
+                email VARCHAR(100),
+                ativo INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )";
         }
         
         $this->db->exec($sql);
@@ -33,32 +44,45 @@ class UserManager {
     }
     
     private function createDefaultAdmin() {
-        $sql = "SELECT COUNT(*) as total FROM users WHERE username = :username";
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute([':username' => 'admin']);
-        $result = $stmt->fetch();
-        
-        if ($result['total'] == 0) {
-            $this->createUser('admin', 'admin123', 'Administrador', 'admin@bettracker.com');
+        try {
+            $sql = "SELECT COUNT(*) as total FROM users WHERE username = :username";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([':username' => 'admin']);
+            $result = $stmt->fetch();
+            
+            if ($result['total'] == 0) {
+                $this->createUser('admin', 'admin123', 'Administrador', 'admin@bettracker.com');
+            }
+        } catch (\Exception $e) {
+            // Tabela pode não existir ainda, ignora
         }
     }
     
     public function createUser($username, $password, $nomeCompleto, $email = null) {
-        $sql = "INSERT INTO users (username, password, nome_completo, email) 
-                VALUES (:username, :password, :nome_completo, :email)";
+        $sql = "INSERT INTO users (username, password, nome_completo, email, ativo) 
+                VALUES (:username, :password, :nome_completo, :email, :ativo)";
         
         $stmt = $this->db->prepare($sql);
+        
+        // PostgreSQL usa TRUE/FALSE, SQLite usa 1/0
+        $isPostgres = getenv('DATABASE_URL') !== false;
+        $ativo = $isPostgres ? true : 1;
         
         return $stmt->execute([
             ':username' => $username,
             ':password' => password_hash($password, PASSWORD_DEFAULT),
             ':nome_completo' => $nomeCompleto,
-            ':email' => $email
+            ':email' => $email,
+            ':ativo' => $ativo
         ]);
     }
     
     public function login($username, $password) {
-        $sql = "SELECT * FROM users WHERE username = :username AND ativo = 1";
+        // PostgreSQL usa TRUE, SQLite usa 1
+        $isPostgres = getenv('DATABASE_URL') !== false;
+        $ativoValue = $isPostgres ? 'TRUE' : '1';
+        
+        $sql = "SELECT * FROM users WHERE username = :username AND ativo = {$ativoValue}";
         $stmt = $this->db->prepare($sql);
         $stmt->execute([':username' => $username]);
         

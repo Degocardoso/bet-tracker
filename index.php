@@ -44,13 +44,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     
     // Salvar após confirmação
+    // Salvar após confirmação
     if (isset($_POST['action']) && $_POST['action'] === 'save_bet') {
+        $valorApostado = floatval($_POST['valor_apostado'] ?? 0);
+        $retorno = floatval($_POST['retorno'] ?? 0);
+        
+        // Calcula Green ou Red automaticamente
+        $green = null;
+        $red = null;
+        
+        if ($retorno > $valorApostado) {
+            // GREEN - Ganhou
+            $green = $retorno;
+        } else {
+            // RED - Perdeu
+            $red = 0;
+        }
+        
         $betData = [
             'data' => $_POST['data'] ?? date('Y-m-d'),
-            'valor_apostado' => floatval($_POST['valor_apostado'] ?? 0),
+            'valor_apostado' => $valorApostado,
             'odd' => floatval($_POST['odd'] ?? 0),
-            'green' => !empty($_POST['green']) ? floatval($_POST['green']) : null,
-            'red' => !empty($_POST['red']) ? floatval($_POST['red']) : null,
+            'green' => $green,
+            'red' => $red,
             'usuario' => $usuarioLogado,
             'imagem_nome' => $_POST['imagem_nome'] ?? null
         ];
@@ -490,28 +506,31 @@ $statsByUser = $betManager->getStatisticsByUser();
                                 </div>
                                 
                                 <div class="row">
-                                    <div class="col-md-6 mb-3">
+                                    <div class="col-md-4 mb-3">
                                         <label class="form-label">Valor Apostado (R$) *</label>
-                                        <input type="number" name="valor_apostado" class="form-control" step="0.01" value="<?php echo $ocrData['valor_apostado'] ?? ''; ?>" required>
+                                        <input type="number" name="valor_apostado" id="valor_apostado" class="form-control" step="0.01" value="<?php echo $ocrData['valor_apostado'] ?? ''; ?>" required>
                                     </div>
                                     
-                                    <div class="col-md-6 mb-3">
+                                    <div class="col-md-4 mb-3">
                                         <label class="form-label">ODD *</label>
                                         <input type="number" name="odd" class="form-control" step="0.01" value="<?php echo $ocrData['odd'] ?? ''; ?>" required>
                                     </div>
+                                    
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Retorno (R$) *</label>
+                                        <input type="number" name="retorno" id="retorno" class="form-control" step="0.01" value="<?php echo $ocrData['retorno'] ?? ''; ?>" required>
+                                        <small class="text-muted">Valor que recebeu de volta</small>
+                                    </div>
                                 </div>
                                 
-                                <div class="row">
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label">Green (R$)</label>
-                                        <input type="number" name="green" class="form-control" step="0.01" value="<?php echo $ocrData['green'] ?? ''; ?>" placeholder="Deixe vazio se perdeu">
-                                        <small class="text-muted">Preencha se ganhou</small>
-                                    </div>
-                                    
-                                    <div class="col-md-6 mb-3">
-                                        <label class="form-label">Red (R$)</label>
-                                        <input type="number" name="red" class="form-control" step="0.01" value="<?php echo $ocrData['red'] ?? ''; ?>" placeholder="Deixe vazio se ganhou">
-                                        <small class="text-muted">Preencha se perdeu</small>
+                                <!-- Campo hidden para Green e Red (calculado automaticamente) -->
+                                <input type="hidden" name="green" id="green" value="<?php echo $ocrData['green'] ?? ''; ?>">
+                                <input type="hidden" name="red" id="red" value="<?php echo $ocrData['red'] ?? ''; ?>">
+                                
+                                <!-- Indicador visual de resultado -->
+                                <div class="alert alert-info" id="resultado-preview">
+                                    <div id="resultado-texto">
+                                        <i class="bi bi-calculator"></i> Preencha os valores para ver o resultado
                                     </div>
                                 </div>
                                 
@@ -520,6 +539,59 @@ $statsByUser = $betManager->getStatisticsByUser();
                                     <strong>Atenção:</strong> Verifique se os dados estão corretos antes de salvar!
                                 </div>
                             </form>
+
+                            <script>
+                            // Calcula automaticamente Green/Red quando os campos mudarem
+                            document.addEventListener('DOMContentLoaded', function() {
+                                const valorApostado = document.getElementById('valor_apostado');
+                                const retorno = document.getElementById('retorno');
+                                const greenField = document.getElementById('green');
+                                const redField = document.getElementById('red');
+                                const resultadoPreview = document.getElementById('resultado-preview');
+                                const resultadoTexto = document.getElementById('resultado-texto');
+                                
+                                function calcularResultado() {
+                                    const apostado = parseFloat(valorApostado.value) || 0;
+                                    const retornoVal = parseFloat(retorno.value) || 0;
+                                    
+                                    if (apostado > 0 && retornoVal > 0) {
+                                        if (retornoVal > apostado) {
+                                            // GREEN
+                                            greenField.value = retornoVal;
+                                            redField.value = '';
+                                            resultadoPreview.className = 'alert alert-success';
+                                            const lucro = retornoVal - apostado;
+                                            resultadoTexto.innerHTML = `
+                                                <i class="bi bi-check-circle"></i> 
+                                                <strong>GREEN!</strong> Você ganhou R$ ${lucro.toFixed(2)} 
+                                                (Retorno: R$ ${retornoVal.toFixed(2)} > Apostado: R$ ${apostado.toFixed(2)})
+                                            `;
+                                        } else {
+                                            // RED
+                                            greenField.value = '';
+                                            redField.value = '0';
+                                            resultadoPreview.className = 'alert alert-danger';
+                                            const prejuizo = apostado - retornoVal;
+                                            resultadoTexto.innerHTML = `
+                                                <i class="bi bi-x-circle"></i> 
+                                                <strong>RED!</strong> Você perdeu R$ ${prejuizo.toFixed(2)} 
+                                                (Retorno: R$ ${retornoVal.toFixed(2)} <= Apostado: R$ ${apostado.toFixed(2)})
+                                            `;
+                                        }
+                                    } else {
+                                        resultadoPreview.className = 'alert alert-info';
+                                        resultadoTexto.innerHTML = '<i class="bi bi-calculator"></i> Preencha os valores para ver o resultado';
+                                    }
+                                }
+                                
+                                // Calcula quando os valores mudarem
+                                valorApostado.addEventListener('input', calcularResultado);
+                                retorno.addEventListener('input', calcularResultado);
+                                
+                                // Calcula imediatamente se já tiver valores
+                                calcularResultado();
+                            });
+                            </script>
                         </div>
                     </div>
                 </div>

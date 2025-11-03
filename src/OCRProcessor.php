@@ -27,6 +27,7 @@ class OCRProcessor {
             'data' => date('Y-m-d'),
             'valor_apostado' => '',
             'odd' => '',
+            'retorno' => '',
             'green' => null,
             'red' => null
         ];
@@ -37,11 +38,15 @@ class OCRProcessor {
             'data' => date('Y-m-d'),
             'valor_apostado' => '',
             'odd' => '',
+            'retorno' => '',
             'green' => null,
             'red' => null
         ];
         
         $text = $this->normalizeText($text);
+        
+        // LOG para debug
+        error_log("OCR Text: " . $text);
         
         // Extrai DATA no formato dd/mm/yyyy
         if (preg_match('/(\d{2})\/(\d{2})\/(\d{4})/', $text, $matches)) {
@@ -52,72 +57,80 @@ class OCRProcessor {
         }
         
         // Extrai VALOR APOSTADO
-        // Padrão: "Aposta R$130,00" ou "Aposta 130.00"
-        if (preg_match('/aposta\s*r?\$?\s*(\d+[,\.]?\d*)/i', $text, $matches)) {
+        // Padrões: "Aposta R$130,00" ou "Aposta 130.00" ou "R$130.00 Simples"
+        if (preg_match('/aposta\s+r?\$?\s*(\d+[,\.]?\d*)/i', $text, $matches)) {
             $data['valor_apostado'] = $this->parseNumber($matches[1]);
+            error_log("Valor Apostado encontrado: " . $matches[1]);
         }
         
         // Extrai ODD
-        // Busca número decimal isolado (1.68, 2.10, etc)
-        // Ou após palavra "odd", "cotação", etc
-        if (preg_match('/(?:odd|cotacao|cotação)[:\s]*(\d+[,\.]\d+)/i', $text, $matches)) {
-            $data['odd'] = $this->parseNumber($matches[1]);
-        } elseif (preg_match('/\b(\d{1},\d{2})\b/', $text, $matches)) {
-            // Busca padrão X,XX (como 1,68)
-            $data['odd'] = $this->parseNumber($matches[1]);
-        }
+        // Busca número com vírgula ou ponto (1,68 ou 1.68)
+        // Pode estar sozinho ou após texto
+        $numbers = [];
+        preg_match_all('/\b(\d{1,2}[,\.]\d{2})\b/', $text, $numbers);
         
-        // Extrai RETORNO
-        // Padrão: "Retorno R$219,66"
-        if (preg_match('/retorno\s*r?\$?\s*(\d+[,\.]?\d*)/i', $text, $matches)) {
-            $retorno = $this->parseNumber($matches[1]);
-            
-            // Se o retorno é maior que o apostado, é GREEN
-            if ($retorno > 0 && $data['valor_apostado'] > 0) {
-                if ($retorno > $data['valor_apostado']) {
-                    $data['green'] = $retorno;
-                    $data['red'] = null;
-                } else {
-                    $data['red'] = 0;
-                    $data['green'] = null;
+        if (!empty($numbers[1])) {
+            foreach ($numbers[1] as $num) {
+                $parsed = $this->parseNumber($num);
+                // ODD geralmente está entre 1.00 e 50.00
+                if ($parsed >= 1.0 && $parsed <= 50.0 && empty($data['odd'])) {
+                    $data['odd'] = $parsed;
+                    error_log("ODD encontrada: " . $num);
+                    break;
                 }
             }
         }
         
-        // Verifica palavras-chave
-        if (preg_match('/green|ganhou|vit[oó]ria|venceu/i', $text)) {
-            if ($data['valor_apostado'] && $data['odd']) {
-                $data['green'] = $data['valor_apostado'] * $data['odd'];
-                $data['red'] = null;
-            }
+        // Extrai RETORNO
+        // Padrões: "Retorno R$219,66" ou "Retorno 219.66"
+        if (preg_match('/retorno\s+r?\$?\s*(\d+[,\.]?\d*)/i', $text, $matches)) {
+            $data['retorno'] = $this->parseNumber($matches[1]);
+            error_log("Retorno encontrado: " . $matches[1]);
         }
         
-        if (preg_match('/red|perdeu|derrota/i', $text)) {
-            $data['red'] = 0;
-            $data['green'] = null;
+        // CALCULA GREEN OU RED automaticamente
+        if ($data['retorno'] && $data['valor_apostado']) {
+            if ($data['retorno'] > $data['valor_apostado']) {
+                // GANHOU (Green)
+                $data['green'] = $data['retorno'];
+                $data['red'] = null;
+                error_log("GREEN! Retorno: {$data['retorno']} > Apostado: {$data['valor_apostado']}");
+            } else {
+                // PERDEU (Red)
+                $data['red'] = 0; // Perda total
+                $data['green'] = null;
+                error_log("RED! Retorno: {$data['retorno']} <= Apostado: {$data['valor_apostado']}");
+            }
         }
         
         return $data;
     }
     
     private function normalizeText($text) {
+        // Preserva números com pontos/vírgulas
         $text = strtolower($text);
+        // Remove múltiplos espaços mas preserva números
         $text = preg_replace('/\s+/', ' ', $text);
-        return $text;
+        return trim($text);
     }
     
     private function parseNumber($value) {
         $value = trim($value);
         // Remove R$ e espaços
-        $value = str_replace(['R$', ' '], '', $value);
+        $value = str_replace(['R$', 'r$', ' '], '', $value);
+        
         // Substitui vírgula por ponto
         $value = str_replace(',', '.', $value);
-        // Remove pontos de milhar
+        
+        // Remove pontos de milhar (se houver mais de um ponto)
         if (substr_count($value, '.') > 1) {
             $parts = explode('.', $value);
             $decimal = array_pop($parts);
             $value = implode('', $parts) . '.' . $decimal;
         }
-        return floatval($value);
+        
+        $result = floatval($value);
+        error_log("Parse: '$value' => $result");
+        return $result;
     }
 }

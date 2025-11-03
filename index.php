@@ -69,16 +69,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $valorApostado = floatval($_POST['valor_apostado'] ?? 0);
         $retorno = floatval($_POST['retorno'] ?? 0);
         
-        // Calcula Green ou Red automaticamente
+        // Verifica se é aposta em aberto
+        $semResultado = isset($_POST['sem_resultado']) && $_POST['sem_resultado'] === 'on';
+        
         $green = null;
         $red = null;
         
-        if ($retorno > $valorApostado) {
-            // GREEN - Ganhou
-            $green = $retorno;
-        } else {
-            // RED - Perdeu
-            $red = 0;
+        if (!$semResultado && $retorno > 0) {
+            if ($retorno > $valorApostado) {
+                $green = $retorno;
+            } else {
+                $red = 0;
+            }
         }
         
         $betData = [
@@ -96,6 +98,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $messageType = 'success';
         } else {
             $message = 'Erro ao salvar a aposta.';
+            $messageType = 'danger';
+        }
+    }
+    
+    // Fechar aposta (só quem criou)
+    if (isset($_POST['action']) && $_POST['action'] === 'fechar_aposta') {
+        $id = intval($_POST['id']);
+        $retorno = floatval($_POST['retorno']);
+        
+        if ($betManager->updateBetResult($id, $retorno, $usuarioLogado)) {
+            $message = 'Aposta fechada com sucesso!';
+            $messageType = 'success';
+        } else {
+            $message = 'Erro: Você só pode fechar suas próprias apostas.';
             $messageType = 'danger';
         }
     }
@@ -138,8 +154,9 @@ if (isset($_GET['export'])) {
 $usuario = $_GET['usuario'] ?? null;
 $dataInicio = $_GET['data_inicio'] ?? null;
 $dataFim = $_GET['data_fim'] ?? null;
+$statusFiltro = $_GET['status'] ?? null;
 
-$bets = $betManager->getAllBets($usuario, $dataInicio, $dataFim);
+$bets = $betManager->getAllBets($usuario, $dataInicio, $dataFim, $statusFiltro);
 $usuarios = $betManager->getUsuarios();
 $stats = $betManager->getStatistics($usuario);
 $statsByUser = $betManager->getStatisticsByUser();
@@ -214,6 +231,10 @@ $statsByUser = $betManager->getStatisticsByUser();
             background-color: #f8d7da !important;
         }
         
+        .table-warning {
+            background-color: #fff3cd !important;
+        }
+        
         .btn-custom {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             border: none;
@@ -274,28 +295,34 @@ $statsByUser = $betManager->getStatisticsByUser();
 
         <!-- Estatísticas Gerais -->
         <div class="row mb-4">
-            <div class="col-md-3 col-6 mb-3">
+            <div class="col-md-2 col-6 mb-3">
                 <div class="stats-card">
                     <h4><?php echo intval($stats['total_apostas'] ?? 0); ?></h4>
                     <p class="mb-0">Total de Apostas</p>
                 </div>
             </div>
-            <div class="col-md-3 col-6 mb-3">
+            <div class="col-md-2 col-6 mb-3">
                 <div class="stats-card">
                     <h4>R$ <?php echo number_format(floatval($stats['total_investido'] ?? 0), 2, ',', '.'); ?></h4>
                     <p class="mb-0">Total Investido</p>
                 </div>
             </div>
-            <div class="col-md-3 col-6 mb-3">
+            <div class="col-md-2 col-6 mb-3">
                 <div class="stats-card" style="background: var(--green-color);">
                     <h4><?php echo intval($stats['total_greens'] ?? 0); ?></h4>
                     <p class="mb-0">Greens</p>
                 </div>
             </div>
-            <div class="col-md-3 col-6 mb-3">
+            <div class="col-md-2 col-6 mb-3">
                 <div class="stats-card" style="background: var(--red-color);">
                     <h4><?php echo intval($stats['total_reds'] ?? 0); ?></h4>
                     <p class="mb-0">Reds</p>
+                </div>
+            </div>
+            <div class="col-md-2 col-6 mb-3">
+                <div class="stats-card" style="background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);">
+                    <h4><?php echo intval($stats['total_em_aberto'] ?? 0); ?></h4>
+                    <p class="mb-0">Em Aberto</p>
                 </div>
             </div>
         </div>
@@ -341,6 +368,7 @@ $statsByUser = $betManager->getStatisticsByUser();
                             <th>ROI %</th>
                             <th>Greens</th>
                             <th>Reds</th>
+                            <th>Em Aberto</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -363,6 +391,7 @@ $statsByUser = $betManager->getStatisticsByUser();
                             </td>
                             <td><span class="badge bg-success"><?php echo intval($userStat['total_greens']); ?></span></td>
                             <td><span class="badge bg-danger"><?php echo intval($userStat['total_reds']); ?></span></td>
+                            <td><span class="badge bg-warning text-dark"><?php echo intval($userStat['total_em_aberto']); ?></span></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -417,9 +446,20 @@ $statsByUser = $betManager->getStatisticsByUser();
                         </div>
                         
                         <div class="col-md-3 mb-3">
-                            <label class="form-label">Retorno (R$) *</label>
-                            <input type="number" name="retorno" id="manual_retorno" class="form-control" step="0.01" required placeholder="219.66">
+                            <label class="form-label">Retorno (R$)</label>
+                            <input type="number" name="retorno" id="manual_retorno" class="form-control" step="0.01" placeholder="219.66">
+                            <small class="text-muted">Deixe vazio se ainda não fechou</small>
                         </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="sem_resultado" name="sem_resultado">
+                            <label class="form-check-label" for="sem_resultado">
+                                <strong>Aposta ainda está em aberto</strong> (sem resultado ainda)
+                            </label>
+                        </div>
+                        <small class="text-muted">Marque esta opção se a aposta ainda não fechou. Você poderá adicionar o resultado depois.</small>
                     </div>
 
                     <!-- Preview do resultado em tempo real -->
@@ -463,7 +503,7 @@ $statsByUser = $betManager->getStatisticsByUser();
         <div class="main-card p-4 mb-4">
             <h3 class="mb-4"><i class="bi bi-filter"></i> Filtros</h3>
             <form method="GET" class="row g-3">
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label class="form-label">Usuário</label>
                     <select name="usuario" class="form-select">
                         <option value="">Todos</option>
@@ -474,13 +514,22 @@ $statsByUser = $betManager->getStatisticsByUser();
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label">Data Início</label>
                     <input type="date" name="data_inicio" class="form-control" value="<?php echo htmlspecialchars($dataInicio ?? ''); ?>">
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label">Data Fim</label>
                     <input type="date" name="data_fim" class="form-control" value="<?php echo htmlspecialchars($dataFim ?? ''); ?>">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select name="status" class="form-select">
+                        <option value="">Todos</option>
+                        <option value="em_aberto" <?php echo $statusFiltro === 'em_aberto' ? 'selected' : ''; ?>>Em Aberto</option>
+                        <option value="green" <?php echo $statusFiltro === 'green' ? 'selected' : ''; ?>>Green (Ganhou)</option>
+                        <option value="red" <?php echo $statusFiltro === 'red' ? 'selected' : ''; ?>>Red (Perdeu)</option>
+                    </select>
                 </div>
                 <div class="col-md-2 d-flex align-items-end">
                     <button type="submit" class="btn btn-custom w-100">
@@ -520,15 +569,18 @@ $statsByUser = $betManager->getStatisticsByUser();
                                 <th>ODD</th>
                                 <th>Green</th>
                                 <th>Red</th>
+                                <th>Status</th>
                                 <th>Usuário</th>
-                                <?php if ($isAdmin): ?>
                                 <th>Ações</th>
-                                <?php endif; ?>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($bets as $bet): ?>
-                            <tr class="<?php echo $bet['green'] ? 'table-green' : ($bet['red'] !== null ? 'table-red' : ''); ?>">
+                            <tr class="<?php 
+                                if ($bet['status'] === 'green') echo 'table-green';
+                                elseif ($bet['status'] === 'red') echo 'table-red';
+                                elseif ($bet['status'] === 'em_aberto') echo 'table-warning';
+                            ?>">
                                 <td><?php echo htmlspecialchars($bet['data'] ?? '-'); ?></td>
                                 <td>R$ <?php echo number_format(floatval($bet['valor_apostado'] ?? 0), 2, ',', '.'); ?></td>
                                 <td><?php echo number_format(floatval($bet['odd'] ?? 0), 2, ',', '.'); ?></td>
@@ -538,14 +590,35 @@ $statsByUser = $betManager->getStatisticsByUser();
                                 <td>
                                     <?php echo $bet['red'] !== null ? 'R$ ' . number_format(floatval($bet['red']), 2, ',', '.') : '-'; ?>
                                 </td>
-                                <td><?php echo htmlspecialchars($bet['usuario'] ?? '-'); ?></td>
-                                <?php if ($isAdmin): ?>
                                 <td>
-                                    <button class="btn btn-danger btn-sm" onclick="confirmarExclusao(<?php echo $bet['id']; ?>)">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
+                                    <?php if ($bet['status'] === 'em_aberto'): ?>
+                                        <span class="badge bg-warning text-dark">
+                                            <i class="bi bi-clock"></i> Em Aberto
+                                        </span>
+                                    <?php elseif ($bet['status'] === 'green'): ?>
+                                        <span class="badge bg-success">
+                                            <i class="bi bi-check-circle"></i> Green
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="badge bg-danger">
+                                            <i class="bi bi-x-circle"></i> Red
+                                        </span>
+                                    <?php endif; ?>
                                 </td>
-                                <?php endif; ?>
+                                <td><?php echo htmlspecialchars($bet['usuario'] ?? '-'); ?></td>
+                                <td>
+                                    <?php if ($bet['status'] === 'em_aberto' && $bet['usuario'] === $usuarioLogado): ?>
+                                        <button class="btn btn-primary btn-sm" onclick="fecharAposta(<?php echo $bet['id']; ?>, <?php echo $bet['valor_apostado']; ?>)">
+                                            <i class="bi bi-check-square"></i> Fechar
+                                        </button>
+                                    <?php endif; ?>
+                                    
+                                    <?php if ($isAdmin): ?>
+                                        <button class="btn btn-danger btn-sm" onclick="confirmarExclusao(<?php echo $bet['id']; ?>)">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -615,9 +688,18 @@ $statsByUser = $betManager->getStatisticsByUser();
                                     </div>
                                     
                                     <div class="col-md-4 mb-3">
-                                        <label class="form-label">Retorno (R$) *</label>
-                                        <input type="number" name="retorno" id="retorno" class="form-control" step="0.01" value="<?php echo $ocrData['retorno'] ?? ''; ?>" required>
-                                        <small class="text-muted">Valor que recebeu de volta</small>
+                                        <label class="form-label">Retorno (R$)</label>
+                                        <input type="number" name="retorno" id="retorno" class="form-control" step="0.01" value="<?php echo $ocrData['retorno'] ?? ''; ?>">
+                                        <small class="text-muted">Deixe vazio se ainda não fechou</small>
+                                    </div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="sem_resultado_modal" name="sem_resultado">
+                                        <label class="form-check-label" for="sem_resultado_modal">
+                                            <strong>Aposta ainda está em aberto</strong>
+                                        </label>
                                     </div>
                                 </div>
                                 
@@ -652,6 +734,49 @@ $statsByUser = $betManager->getStatisticsByUser();
         </div>
     </div>
     <?php endif; ?>
+
+    <!-- Modal para Fechar Aposta -->
+    <div class="modal fade" id="fecharApostaModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Fechar Aposta</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="POST" id="fecharApostaForm">
+                    <div class="modal-body">
+                        <input type="hidden" name="action" value="fechar_aposta">
+                        <input type="hidden" name="id" id="fechar_aposta_id">
+                        
+                        <p>Informe o <strong>valor do retorno</strong> para fechar esta aposta:</p>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Valor Apostado:</label>
+                            <input type="text" class="form-control" id="fechar_valor_apostado" readonly>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Retorno (R$) *</label>
+                            <input type="number" name="retorno" id="fechar_retorno" class="form-control" step="0.01" required>
+                            <small class="text-muted">Digite o valor que você recebeu de volta</small>
+                        </div>
+                        
+                        <div class="alert alert-info" id="fechar-resultado-preview">
+                            <div id="fechar-resultado-texto">
+                                <i class="bi bi-calculator"></i> Digite o retorno para ver o resultado
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-circle"></i> Fechar Aposta
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
 
     <!-- Modal de Exclusão (só admin) -->
     <?php if ($isAdmin): ?>
@@ -700,10 +825,17 @@ $statsByUser = $betManager->getStatisticsByUser();
             const manualRetorno = document.getElementById('manual_retorno');
             const manualResultadoPreview = document.getElementById('manual-resultado-preview');
             const manualResultadoTexto = document.getElementById('manual-resultado-texto');
+            const semResultadoCheck = document.getElementById('sem_resultado');
             
             function calcularResultadoManual() {
                 const apostado = parseFloat(manualValor?.value) || 0;
                 const retornoVal = parseFloat(manualRetorno?.value) || 0;
+                
+                if (semResultadoCheck?.checked) {
+                    manualResultadoPreview.className = 'alert alert-warning';
+                    manualResultadoTexto.innerHTML = '<i class="bi bi-clock"></i> <strong>Aposta será cadastrada como EM ABERTO</strong>';
+                    return;
+                }
                 
                 if (apostado > 0 && retornoVal > 0) {
                     if (retornoVal > apostado) {
@@ -734,6 +866,7 @@ $statsByUser = $betManager->getStatisticsByUser();
             if (manualValor && manualRetorno) {
                 manualValor.addEventListener('input', calcularResultadoManual);
                 manualRetorno.addEventListener('input', calcularResultadoManual);
+                semResultadoCheck?.addEventListener('change', calcularResultadoManual);
             }
             
             // Calcula automaticamente Green/Red no modal de confirmação
@@ -743,12 +876,21 @@ $statsByUser = $betManager->getStatisticsByUser();
             const redField = document.getElementById('red');
             const resultadoPreview = document.getElementById('resultado-preview');
             const resultadoTexto = document.getElementById('resultado-texto');
+            const semResultadoModal = document.getElementById('sem_resultado_modal');
             
             function calcularResultado() {
                 if (!valorApostado || !retorno) return;
                 
                 const apostado = parseFloat(valorApostado.value) || 0;
                 const retornoVal = parseFloat(retorno.value) || 0;
+                
+                if (semResultadoModal?.checked) {
+                    resultadoPreview.className = 'alert alert-warning';
+                    resultadoTexto.innerHTML = '<i class="bi bi-clock"></i> <strong>Aposta será cadastrada como EM ABERTO</strong>';
+                    greenField.value = '';
+                    redField.value = '';
+                    return;
+                }
                 
                 if (apostado > 0 && retornoVal > 0) {
                     if (retornoVal > apostado) {
@@ -783,9 +925,50 @@ $statsByUser = $betManager->getStatisticsByUser();
             if (valorApostado && retorno) {
                 valorApostado.addEventListener('input', calcularResultado);
                 retorno.addEventListener('input', calcularResultado);
+                semResultadoModal?.addEventListener('change', calcularResultado);
                 calcularResultado(); // Calcula imediatamente se já tiver valores
             }
         });
+        
+        function fecharAposta(id, valorApostado) {
+            document.getElementById('fechar_aposta_id').value = id;
+            document.getElementById('fechar_valor_apostado').value = 'R$ ' + valorApostado.toFixed(2).replace('.', ',');
+            
+            const modal = new bootstrap.Modal(document.getElementById('fecharApostaModal'));
+            modal.show();
+            
+            // Cálculo em tempo real
+            const retornoInput = document.getElementById('fechar_retorno');
+            const resultadoPreview = document.getElementById('fechar-resultado-preview');
+            const resultadoTexto = document.getElementById('fechar-resultado-texto');
+            
+            retornoInput.value = '';
+            
+            retornoInput.addEventListener('input', function() {
+                const retorno = parseFloat(retornoInput.value) || 0;
+                
+                if (retorno > 0) {
+                    if (retorno > valorApostado) {
+                        resultadoPreview.className = 'alert alert-success';
+                        const lucro = retorno - valorApostado;
+                        resultadoTexto.innerHTML = `
+                            <i class="bi bi-check-circle-fill"></i> 
+                            <strong>GREEN!</strong> Você ganhou R$ ${lucro.toFixed(2)}
+                        `;
+                    } else {
+                        resultadoPreview.className = 'alert alert-danger';
+                        const prejuizo = valorApostado - retorno;
+                        resultadoTexto.innerHTML = `
+                            <i class="bi bi-x-circle-fill"></i> 
+                            <strong>RED!</strong> Você perdeu R$ ${prejuizo.toFixed(2)}
+                        `;
+                    }
+                } else {
+                    resultadoPreview.className = 'alert alert-info';
+                    resultadoTexto.innerHTML = '<i class="bi bi-calculator"></i> Digite o retorno para ver o resultado';
+                }
+            });
+        }
         
         function confirmarExclusao(id) {
             document.getElementById('deleteId').value = id;

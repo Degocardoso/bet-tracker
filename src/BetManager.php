@@ -9,8 +9,14 @@ class BetManager {
     }
     
     public function saveBet($data) {
-        $sql = "INSERT INTO bets (data, valor_apostado, odd, green, red, usuario, imagem_nome) 
-                VALUES (:data, :valor_apostado, :odd, :green, :red, :usuario, :imagem_nome)";
+        // Define status baseado se tem resultado ou não
+        $status = 'em_aberto';
+        if ($data['green'] !== null || $data['red'] !== null) {
+            $status = $data['green'] ? 'green' : 'red';
+        }
+        
+        $sql = "INSERT INTO bets (data, valor_apostado, odd, green, red, usuario, imagem_nome, status) 
+                VALUES (:data, :valor_apostado, :odd, :green, :red, :usuario, :imagem_nome, :status)";
         
         $stmt = $this->db->prepare($sql);
         
@@ -21,11 +27,43 @@ class BetManager {
             ':green' => $data['green'],
             ':red' => $data['red'],
             ':usuario' => $data['usuario'],
-            ':imagem_nome' => $data['imagem_nome'] ?? null
+            ':imagem_nome' => $data['imagem_nome'] ?? null,
+            ':status' => $status
         ]);
     }
     
-    public function getAllBets($usuario = null, $dataInicio = null, $dataFim = null) {
+    public function updateBetResult($id, $retorno, $usuario) {
+        // Primeiro verifica se a aposta pertence ao usuário
+        $bet = $this->getBet($id);
+        if (!$bet || $bet['usuario'] !== $usuario) {
+            return false; // Não pode editar aposta de outro usuário
+        }
+        
+        // Calcula Green ou Red
+        $green = null;
+        $red = null;
+        $status = 'em_aberto';
+        
+        if ($retorno > $bet['valor_apostado']) {
+            $green = $retorno;
+            $status = 'green';
+        } else {
+            $red = 0;
+            $status = 'red';
+        }
+        
+        $sql = "UPDATE bets SET green = :green, red = :red, status = :status WHERE id = :id";
+        $stmt = $this->db->prepare($sql);
+        
+        return $stmt->execute([
+            ':id' => $id,
+            ':green' => $green,
+            ':red' => $red,
+            ':status' => $status
+        ]);
+    }
+    
+    public function getAllBets($usuario = null, $dataInicio = null, $dataFim = null, $status = null) {
         $sql = "SELECT * FROM bets WHERE 1=1";
         $params = [];
         
@@ -42,6 +80,11 @@ class BetManager {
         if ($dataFim) {
             $sql .= " AND data <= :data_fim";
             $params[':data_fim'] = $dataFim;
+        }
+        
+        if ($status) {
+            $sql .= " AND status = :status";
+            $params[':status'] = $status;
         }
         
         $sql .= " ORDER BY data DESC, created_at DESC";
@@ -77,8 +120,9 @@ class BetManager {
                     SUM(valor_apostado) as total_investido,
                     SUM(CASE WHEN green IS NOT NULL THEN green ELSE 0 END) as total_ganho,
                     SUM(CASE WHEN red IS NOT NULL THEN valor_apostado ELSE 0 END) as total_perdido,
-                    COUNT(CASE WHEN green IS NOT NULL THEN 1 END) as total_greens,
-                    COUNT(CASE WHEN red IS NOT NULL THEN 1 END) as total_reds
+                    COUNT(CASE WHEN status = 'green' THEN 1 END) as total_greens,
+                    COUNT(CASE WHEN status = 'red' THEN 1 END) as total_reds,
+                    COUNT(CASE WHEN status = 'em_aberto' THEN 1 END) as total_em_aberto
                 FROM bets";
         
         $params = [];
@@ -91,7 +135,6 @@ class BetManager {
         $stmt->execute($params);
         $stats = $stmt->fetch();
         
-        // Calcula saldo (lucro/prejuízo)
         $stats['total_investido'] = floatval($stats['total_investido'] ?? 0);
         $stats['total_ganho'] = floatval($stats['total_ganho'] ?? 0);
         $stats['total_perdido'] = floatval($stats['total_perdido'] ?? 0);
@@ -103,15 +146,15 @@ class BetManager {
         return $stats;
     }
     
-    // NOVO: Estatísticas por usuário
     public function getStatisticsByUser() {
         $sql = "SELECT 
                     usuario,
                     COUNT(*) as total_apostas,
                     SUM(valor_apostado) as total_investido,
                     SUM(CASE WHEN green IS NOT NULL THEN green ELSE 0 END) as total_ganho,
-                    COUNT(CASE WHEN green IS NOT NULL THEN 1 END) as total_greens,
-                    COUNT(CASE WHEN red IS NOT NULL THEN 1 END) as total_reds
+                    COUNT(CASE WHEN status = 'green' THEN 1 END) as total_greens,
+                    COUNT(CASE WHEN status = 'red' THEN 1 END) as total_reds,
+                    COUNT(CASE WHEN status = 'em_aberto' THEN 1 END) as total_em_aberto
                 FROM bets
                 GROUP BY usuario
                 ORDER BY usuario";
@@ -119,7 +162,6 @@ class BetManager {
         $stmt = $this->db->query($sql);
         $results = $stmt->fetchAll();
         
-        // Calcula saldo para cada usuário
         foreach ($results as &$user) {
             $user['total_investido'] = floatval($user['total_investido'] ?? 0);
             $user['total_ganho'] = floatval($user['total_ganho'] ?? 0);

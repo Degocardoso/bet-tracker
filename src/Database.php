@@ -63,6 +63,7 @@ class Database {
                 red DECIMAL(10,2) DEFAULT NULL,
                 usuario VARCHAR(100) NOT NULL,
                 imagem_nome VARCHAR(255),
+                status VARCHAR(20) DEFAULT 'em_aberto',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ";
@@ -74,5 +75,21 @@ class Database {
         }
         
         $this->connection->exec($sql);
+        
+        // Adiciona coluna status se não existir (para bancos antigos)
+        try {
+            if (getenv('DATABASE_URL')) {
+                $this->connection->exec("ALTER TABLE bets ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'em_aberto'");
+            } else {
+                // SQLite não suporta IF NOT EXISTS em ALTER, então tenta e ignora erro
+                try {
+                    $this->connection->exec("ALTER TABLE bets ADD COLUMN status VARCHAR(20) DEFAULT 'em_aberto'");
+                } catch (\Exception $e) {
+                    // Coluna já existe, ignora
+                }
+            }
+        } catch (\Exception $e) {
+            // Ignora erros
+        }
     }
 }

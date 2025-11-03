@@ -1,36 +1,49 @@
 FROM php:8.1-apache
 
-# Instala extensões PHP necessárias
+# Instala dependências do sistema
 RUN apt-get update && apt-get install -y \
     libpng-dev \
     libjpeg-dev \
     libfreetype6-dev \
+    libpq-dev \
     tesseract-ocr \
     tesseract-ocr-por \
     zip \
     unzip \
     git \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j$(nproc) gd pdo pdo_mysql pdo_pgsql
+    && rm -rf /var/lib/apt/lists/*
 
-# Instala Composer
+# Configura e instala extensão GD
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg
+
+# Instala extensões PHP (separado para evitar erro)
+RUN docker-php-ext-install gd
+RUN docker-php-ext-install pdo
+RUN docker-php-ext-install pdo_pgsql
+
+# Copia Composer do container oficial
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Copia arquivos do projeto
-COPY . /var/www/html/
+# Habilita mod_rewrite
+RUN a2enmod rewrite
 
-# Define o diretório de trabalho
+# Define diretório de trabalho
 WORKDIR /var/www/html
 
+# Copia arquivos do projeto
+COPY . .
+
 # Instala dependências PHP
-RUN composer install --no-dev --optimize-autoloader
+RUN composer install --no-dev --optimize-autoloader --no-interaction || composer install --optimize-autoloader
 
-# Dá permissões
-RUN chown -R www-data:www-data /var/www/html \
-    && chmod -R 755 /var/www/html
+# Cria diretórios temporários
+RUN mkdir -p /tmp/uploads /tmp/data && chmod -R 777 /tmp
 
-# Expõe a porta 80
+# Define permissões
+RUN chown -R www-data:www-data /var/www/html && chmod -R 755 /var/www/html
+
+# Expõe porta 80
 EXPOSE 80
 
-# Comando para iniciar
+# Comando de inicialização
 CMD ["apache2-foreground"]

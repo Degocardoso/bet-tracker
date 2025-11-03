@@ -1,0 +1,7 @@
+.git
+.gitignore
+vendor/
+data/*.db
+uploads/*
+node_modules/
+*.md

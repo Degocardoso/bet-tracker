@@ -5,11 +5,9 @@ class OCRProcessor {
     
     public function processImage($imagePath) {
         try {
-            // Verifica se Tesseract está disponível
             if (class_exists('thiagoalessio\TesseractOCR\TesseractOCR')) {
                 return $this->processWithTesseract($imagePath);
             } else {
-                // Fallback: retorna dados vazios para o usuário preencher manualmente
                 return $this->getEmptyData();
             }
         } catch (\Exception $e) {
@@ -27,8 +25,8 @@ class OCRProcessor {
     private function getEmptyData() {
         return [
             'data' => date('Y-m-d'),
-            'valor_apostado' => 0,
-            'odd' => 0,
+            'valor_apostado' => '',
+            'odd' => '',
             'green' => null,
             'red' => null
         ];
@@ -36,56 +34,67 @@ class OCRProcessor {
     
     private function extractBetData($text) {
         $data = [
-            'data' => null,
-            'valor_apostado' => null,
-            'odd' => null,
+            'data' => date('Y-m-d'),
+            'valor_apostado' => '',
+            'odd' => '',
             'green' => null,
             'red' => null
         ];
         
         $text = $this->normalizeText($text);
         
-        // Extrai DATA
-        if (preg_match('/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/', $text, $matches)) {
-            $day = str_pad($matches[1], 2, '0', STR_PAD_LEFT);
-            $month = str_pad($matches[2], 2, '0', STR_PAD_LEFT);
-            $year = strlen($matches[3]) == 2 ? '20' . $matches[3] : $matches[3];
+        // Extrai DATA no formato dd/mm/yyyy
+        if (preg_match('/(\d{2})\/(\d{2})\/(\d{4})/', $text, $matches)) {
+            $day = $matches[1];
+            $month = $matches[2];
+            $year = $matches[3];
             $data['data'] = "$year-$month-$day";
         }
         
         // Extrai VALOR APOSTADO
-        if (preg_match('/(?:valor|aposta|investido|apostado)[:\s]*r?\$?\s*(\d+[,\.]?\d*)/i', $text, $matches)) {
-            $data['valor_apostado'] = $this->parseNumber($matches[1]);
-        } elseif (preg_match('/r\$\s*(\d+[,\.]?\d*)/', $text, $matches)) {
+        // Padrão: "Aposta R$130,00" ou "Aposta 130.00"
+        if (preg_match('/aposta\s*r?\$?\s*(\d+[,\.]?\d*)/i', $text, $matches)) {
             $data['valor_apostado'] = $this->parseNumber($matches[1]);
         }
         
         // Extrai ODD
-        if (preg_match('/(?:odd|cotacao|cotação|@)[:\s]*(\d+[,\.]?\d*)/', $text, $matches)) {
+        // Busca número decimal isolado (1.68, 2.10, etc)
+        // Ou após palavra "odd", "cotação", etc
+        if (preg_match('/(?:odd|cotacao|cotação)[:\s]*(\d+[,\.]\d+)/i', $text, $matches)) {
+            $data['odd'] = $this->parseNumber($matches[1]);
+        } elseif (preg_match('/\b(\d{1},\d{2})\b/', $text, $matches)) {
+            // Busca padrão X,XX (como 1,68)
             $data['odd'] = $this->parseNumber($matches[1]);
         }
         
         // Extrai RETORNO
-        $retorno = null;
-        if (preg_match('/(?:retorno|ganho|lucro|premio|prêmio)[:\s]*r?\$?\s*(\d+[,\.]?\d*)/i', $text, $matches)) {
+        // Padrão: "Retorno R$219,66"
+        if (preg_match('/retorno\s*r?\$?\s*(\d+[,\.]?\d*)/i', $text, $matches)) {
             $retorno = $this->parseNumber($matches[1]);
-        }
-        
-        // Calcula Green ou Red
-        if ($retorno !== null && $data['valor_apostado'] !== null) {
-            if ($retorno > $data['valor_apostado']) {
-                $data['green'] = $retorno;
-            } else {
-                $data['red'] = $data['valor_apostado'] - $retorno;
+            
+            // Se o retorno é maior que o apostado, é GREEN
+            if ($retorno > 0 && $data['valor_apostado'] > 0) {
+                if ($retorno > $data['valor_apostado']) {
+                    $data['green'] = $retorno;
+                    $data['red'] = null;
+                } else {
+                    $data['red'] = 0;
+                    $data['green'] = null;
+                }
             }
         }
         
-        if (preg_match('/green|vit[oó]ria|ganhou/i', $text) && $data['valor_apostado'] && $data['odd']) {
-            $data['green'] = $data['valor_apostado'] * $data['odd'];
+        // Verifica palavras-chave
+        if (preg_match('/green|ganhou|vit[oó]ria|venceu/i', $text)) {
+            if ($data['valor_apostado'] && $data['odd']) {
+                $data['green'] = $data['valor_apostado'] * $data['odd'];
+                $data['red'] = null;
+            }
         }
         
-        if (preg_match('/red|derrota|perdeu/i', $text) && $data['valor_apostado']) {
+        if (preg_match('/red|perdeu|derrota/i', $text)) {
             $data['red'] = 0;
+            $data['green'] = null;
         }
         
         return $data;
@@ -99,7 +108,11 @@ class OCRProcessor {
     
     private function parseNumber($value) {
         $value = trim($value);
+        // Remove R$ e espaços
+        $value = str_replace(['R$', ' '], '', $value);
+        // Substitui vírgula por ponto
         $value = str_replace(',', '.', $value);
+        // Remove pontos de milhar
         if (substr_count($value, '.') > 1) {
             $parts = explode('.', $value);
             $decimal = array_pop($parts);

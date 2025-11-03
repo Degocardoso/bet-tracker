@@ -19,10 +19,13 @@ $isAdmin = $_SESSION['username'] === 'admin';
 
 $message = '';
 $messageType = '';
+$ocrData = null;
+$uploadedImage = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
-    if (isset($_POST['action']) && $_POST['action'] === 'upload') {
+    // Upload inicial - só processa OCR
+    if (isset($_POST['action']) && $_POST['action'] === 'upload_preview') {
         if (isset($_FILES['imagem']) && $_FILES['imagem']['error'] === UPLOAD_ERR_OK) {
             $uploadDir = __DIR__ . '/uploads/';
             if (!is_dir($uploadDir)) {
@@ -34,34 +37,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if (move_uploaded_file($_FILES['imagem']['tmp_name'], $filepath)) {
                 $ocrProcessor = new OCRProcessor();
-                $extractedData = $ocrProcessor->processImage($filepath);
-                
-                if ($extractedData) {
-                    $extractedData['usuario'] = $usuarioLogado;
-                    $extractedData['imagem_nome'] = $filename;
-                    
-                    if ($betManager->saveBet($extractedData)) {
-                        $message = 'Aposta cadastrada com sucesso!';
-                        $messageType = 'success';
-                    } else {
-                        $message = 'Erro ao salvar a aposta.';
-                        $messageType = 'danger';
-                    }
-                } else {
-                    $message = 'Não foi possível extrair dados da imagem. Por favor, verifique a qualidade da imagem.';
-                    $messageType = 'warning';
-                }
-            } else {
-                $message = 'Erro ao fazer upload da imagem.';
-                $messageType = 'danger';
+                $ocrData = $ocrProcessor->processImage($filepath);
+                $uploadedImage = $filename;
             }
+        }
+    }
+    
+    // Salvar após confirmação
+    if (isset($_POST['action']) && $_POST['action'] === 'save_bet') {
+        $betData = [
+            'data' => $_POST['data'] ?? date('Y-m-d'),
+            'valor_apostado' => floatval($_POST['valor_apostado'] ?? 0),
+            'odd' => floatval($_POST['odd'] ?? 0),
+            'green' => !empty($_POST['green']) ? floatval($_POST['green']) : null,
+            'red' => !empty($_POST['red']) ? floatval($_POST['red']) : null,
+            'usuario' => $usuarioLogado,
+            'imagem_nome' => $_POST['imagem_nome'] ?? null
+        ];
+        
+        if ($betManager->saveBet($betData)) {
+            $message = 'Aposta cadastrada com sucesso!';
+            $messageType = 'success';
         } else {
-            $message = 'Por favor, selecione uma imagem.';
+            $message = 'Erro ao salvar a aposta.';
             $messageType = 'danger';
         }
     }
     
-    if (isset($_POST['action']) && $_POST['action'] === 'delete') {
+    // Exclusão (só admin)
+    if (isset($_POST['action']) && $_POST['action'] === 'delete' && $isAdmin) {
         $id = intval($_POST['id']);
         if ($betManager->deleteBet($id)) {
             $message = 'Aposta excluída com sucesso!';
@@ -191,6 +195,17 @@ $statsByUser = $betManager->getStatisticsByUser();
             border-radius: 10px;
             color: white;
         }
+        
+        .preview-image {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .modal-xl {
+            max-width: 900px;
+        }
     </style>
 </head>
 <body>
@@ -249,7 +264,7 @@ $statsByUser = $betManager->getStatisticsByUser();
             </div>
         </div>
 
-        <!-- NOVO: Card de Lucro/Prejuízo Total -->
+        <!-- Card de Lucro/Prejuízo Total -->
         <div class="row mb-4">
             <div class="col-md-6 mb-3">
                 <div class="stats-card <?php echo $stats['saldo'] >= 0 ? 'lucro' : 'prejuizo'; ?>">
@@ -274,7 +289,7 @@ $statsByUser = $betManager->getStatisticsByUser();
             </div>
         </div>
 
-        <!-- NOVO: Estatísticas por Usuário -->
+        <!-- Estatísticas por Usuário -->
         <?php if (count($statsByUser) > 1): ?>
         <div class="main-card p-4 mb-4">
             <h3 class="mb-4"><i class="bi bi-people"></i> Desempenho por Usuário</h3>
@@ -323,8 +338,8 @@ $statsByUser = $betManager->getStatisticsByUser();
         <!-- Upload -->
         <div class="main-card p-4 mb-4">
             <h3 class="mb-4"><i class="bi bi-cloud-upload"></i> Cadastrar Nova Aposta</h3>
-            <form method="POST" enctype="multipart/form-data">
-                <input type="hidden" name="action" value="upload">
+            <form method="POST" enctype="multipart/form-data" id="uploadForm">
+                <input type="hidden" name="action" value="upload_preview">
                 
                 <div class="alert alert-info">
                     <i class="bi bi-info-circle"></i> Suas apostas serão automaticamente registradas como: <strong><?php echo htmlspecialchars($usuarioLogado); ?></strong>
@@ -338,7 +353,7 @@ $statsByUser = $betManager->getStatisticsByUser();
                 </div>
                 
                 <button type="submit" class="btn btn-custom btn-lg w-100">
-                    <i class="bi bi-magic"></i> Processar e Cadastrar
+                    <i class="bi bi-search"></i> Processar Imagem
                 </button>
             </form>
         </div>
@@ -405,7 +420,9 @@ $statsByUser = $betManager->getStatisticsByUser();
                                 <th>Green</th>
                                 <th>Red</th>
                                 <th>Usuário</th>
+                                <?php if ($isAdmin): ?>
                                 <th>Ações</th>
+                                <?php endif; ?>
                             </tr>
                         </thead>
                         <tbody>
@@ -421,11 +438,13 @@ $statsByUser = $betManager->getStatisticsByUser();
                                     <?php echo $bet['red'] !== null ? 'R$ ' . number_format(floatval($bet['red']), 2, ',', '.') : '-'; ?>
                                 </td>
                                 <td><?php echo htmlspecialchars($bet['usuario'] ?? '-'); ?></td>
+                                <?php if ($isAdmin): ?>
                                 <td>
                                     <button class="btn btn-danger btn-sm" onclick="confirmarExclusao(<?php echo $bet['id']; ?>)">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </td>
+                                <?php endif; ?>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -440,7 +459,85 @@ $statsByUser = $betManager->getStatisticsByUser();
         </div>
     </div>
 
-    <!-- Modal de Confirmação de Exclusão -->
+    <!-- Modal de Confirmação dos Dados -->
+    <?php if ($ocrData && $uploadedImage): ?>
+    <div class="modal fade show" id="confirmModal" tabindex="-1" style="display: block; background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-check-circle"></i> Confirmar Dados da Aposta</h5>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-5">
+                            <h6 class="mb-3">Preview da Imagem:</h6>
+                            <img src="uploads/<?php echo htmlspecialchars($uploadedImage); ?>" class="preview-image" alt="Preview">
+                        </div>
+                        <div class="col-md-7">
+                            <h6 class="mb-3">Dados Extraídos:</h6>
+                            <form method="POST" id="confirmForm">
+                                <input type="hidden" name="action" value="save_bet">
+                                <input type="hidden" name="imagem_nome" value="<?php echo htmlspecialchars($uploadedImage); ?>">
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Usuário (não editável)</label>
+                                    <input type="text" class="form-control" value="<?php echo htmlspecialchars($usuarioLogado); ?>" readonly>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Data da Aposta *</label>
+                                    <input type="date" name="data" class="form-control" value="<?php echo $ocrData['data'] ?? date('Y-m-d'); ?>" required>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Valor Apostado (R$) *</label>
+                                        <input type="number" name="valor_apostado" class="form-control" step="0.01" value="<?php echo $ocrData['valor_apostado'] ?? ''; ?>" required>
+                                    </div>
+                                    
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">ODD *</label>
+                                        <input type="number" name="odd" class="form-control" step="0.01" value="<?php echo $ocrData['odd'] ?? ''; ?>" required>
+                                    </div>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Green (R$)</label>
+                                        <input type="number" name="green" class="form-control" step="0.01" value="<?php echo $ocrData['green'] ?? ''; ?>" placeholder="Deixe vazio se perdeu">
+                                        <small class="text-muted">Preencha se ganhou</small>
+                                    </div>
+                                    
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Red (R$)</label>
+                                        <input type="number" name="red" class="form-control" step="0.01" value="<?php echo $ocrData['red'] ?? ''; ?>" placeholder="Deixe vazio se ganhou">
+                                        <small class="text-muted">Preencha se perdeu</small>
+                                    </div>
+                                </div>
+                                
+                                <div class="alert alert-warning">
+                                    <i class="bi bi-exclamation-triangle"></i> 
+                                    <strong>Atenção:</strong> Verifique se os dados estão corretos antes de salvar!
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <a href="index.php" class="btn btn-secondary">
+                        <i class="bi bi-x-circle"></i> Cancelar
+                    </a>
+                    <button type="submit" form="confirmForm" class="btn btn-success">
+                        <i class="bi bi-check-circle"></i> Confirmar e Salvar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- Modal de Exclusão (só admin) -->
+    <?php if ($isAdmin): ?>
     <div class="modal fade" id="deleteModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -462,6 +559,7 @@ $statsByUser = $betManager->getStatisticsByUser();
             </div>
         </div>
     </div>
+    <?php endif; ?>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>

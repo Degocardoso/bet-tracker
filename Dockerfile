@@ -1,28 +1,28 @@
-FROM php:8.1-apache
+FROM php:8.1-cli
 
-# Instala apenas o essencial
+# Instala dependências
 RUN apt-get update && \
-    apt-get install -y libpq-dev && \
+    apt-get install -y libpq-dev unzip git && \
     docker-php-ext-install pdo pdo_pgsql && \
-    a2enmod rewrite && \
     rm -rf /var/lib/apt/lists/*
+
+# Instala Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
 
-# Copia tudo
+# Copia composer.json primeiro
+COPY composer.json ./
+
+# Instala dependências
+RUN composer install --no-dev --optimize-autoloader --no-interaction || composer dump-autoload
+
+# Copia resto dos arquivos
 COPY . .
 
-# Copia script de inicialização
-COPY start.sh /usr/local/bin/start.sh
-RUN chmod +x /usr/local/bin/start.sh
-
 # Cria pastas
-RUN mkdir -p uploads data && \
-    chmod -R 777 uploads data
+RUN mkdir -p uploads data && chmod -R 777 uploads data
 
-# Configura Apache para aceitar qualquer porta
-RUN sed -i 's/Listen 80/Listen ${PORT}/' /etc/apache2/ports.conf && \
-    sed -i 's/:80/:${PORT}/' /etc/apache2/sites-available/000-default.conf
+EXPOSE $PORT
 
-EXPOSE ${PORT}
-CMD ["/usr/local/bin/start.sh"]
+CMD php -S 0.0.0.0:$PORT -t .

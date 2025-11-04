@@ -12,9 +12,17 @@ WORKDIR /var/www/html
 # Copia tudo
 COPY . .
 
+# Copia script de inicialização
+COPY start.sh /usr/local/bin/start.sh
+RUN chmod +x /usr/local/bin/start.sh
+
 # Cria pastas
 RUN mkdir -p uploads data && \
     chmod -R 777 uploads data
 
-EXPOSE 80
-CMD ["apache2-foreground"]
+# Configura Apache para aceitar qualquer porta
+RUN sed -i 's/Listen 80/Listen ${PORT}/' /etc/apache2/ports.conf && \
+    sed -i 's/:80/:${PORT}/' /etc/apache2/sites-available/000-default.conf
+
+EXPOSE ${PORT}
+CMD ["/usr/local/bin/start.sh"]
